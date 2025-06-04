@@ -1,2 +1,2 @@
 #!/bin/sh
-sudo install mingw32-gcc
+sudo dnf install mingw32-gcc
