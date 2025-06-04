@@ -90,7 +90,7 @@ struct {
 static BOOL _createMissingRemap = FALSE;
 
 static void setPowerState();
-static int setResolution();
+static int setResolution(char *data);
 static int optimizeForRemote();
 static int muteSound(BOOL bMute);
 static int setShutdownText();
@@ -172,7 +172,7 @@ static void CALLBACK tmrResolution(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD
 	static BOOL bInProc = FALSE;
 	if (!bInProc) {
 		bInProc = TRUE;
-		if (setResolution() == 0) {
+		if (setResolution("") == 0) {
 			KillTimer(hWnd, idEvent);
 		}
 		bInProc = FALSE;
@@ -438,86 +438,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	if (hUser32 == NULL) {
 		alog("Cannot load user32.dll");
 	}
-	if (GetPrivateProfileIntA("openslx", "persistentMode", 0, SETTINGS_FILE) != 0) {
-		_persistentMode = TRUE;
-	}
 	winVer.dwOSVersionInfoSize = sizeof(winVer);
 	BOOL retVer = GetVersionEx(&winVer);
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 	_startTime = GetTickCount();
 	loadPaths();
+	_debug = TRUE;
 	if (lpCmdLine != NULL && strstr(lpCmdLine, "/debug") != NULL) {
-		_debug = TRUE;
-	}
-	if (!_debug && GetPrivateProfileIntA("openslx", "debug", 0, SETTINGS_FILE) != 0) {
 		_debug = TRUE;
 	}
 	if (_debug) {
 		alog("Windows Version %d.%d", (int)winVer.dwMajorVersion, (int)winVer.dwMinorVersion);
 	}
-	// Mute sound?
-	BOOL mute = GetPrivateProfileIntA("openslx", "muteSound", 1, SETTINGS_FILE) != 0;
-	if (retVer && winVer.dwMajorVersion >= 6)
-		muteSound(mute);
-	// Disable screen saver as it might give the false impression that the session is securely locked
-	SystemParametersInfo(SPI_SETSCREENSAVEACTIVE, FALSE, NULL, 0);
-	// Same with standby
-	setPowerState();
-	// Any network shares to mount?
-	readShareFile();
-	if (shareFileOk || _remapMode != RM_NONE) {
-		UINT_PTR tRet = SetTimer(NULL, 0, 1650, (TIMERPROC)&setupNetworkDrives);
-		dalog("init: &setupNetworkDrives");
-		if (tRet == 0) {
-			alog("Could not create timer for mounting network shares: %d", (int)GetLastError());
-		} else {
-			_mountDone = FALSE;
-		}
-	}
-	// Shutdown button label
-	if (retVer && winVer.dwMajorVersion == 6 && winVer.dwMinorVersion == 1) {
-		// Only on Windows 7
-		// Repeatedly set caption
-		UINT_PTR tRet = SetTimer(NULL, 0, 5230, (TIMERPROC)&resetShutdown);
-		if (tRet == 0) {
-			alog("Could not create timer for shutdown button: %d", (int)GetLastError());
-		}
-	}
-	// Resolution
-	UINT_PTR tRet;
-	tRet = SetTimer(NULL, 0, 211, (TIMERPROC)&tmrResolution);
-	if (tRet == 0) {
-		alog("Could not create timer for resolution setting: %d", (int)GetLastError());
-	}
-	// Runscript
-	tRet = SetTimer(NULL, 0, 3456, (TIMERPROC)&launchRunscript);
-	dalog("init: &launchRunscript");
-	if (tRet == 0) {
-		alog("Could not create timer for runscript: %d", (int)GetLastError());
-	} else {
-		_scriptDone = FALSE;
-	}
+	setResolution(lpCmdLine);
 	// Remote?
-	do {
-		char buffer[100];
-		GetPrivateProfileStringA("openslx", "runMode", "", buffer, sizeof(buffer), SETTINGS_FILE);
-		if (strcmp(buffer, "remoteaccess") == 0) {
-			optimizeForRemote();
-		}
-	} while (0);
-	// Message pump
-	MSG Msg;
-	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
-		TranslateMessage(&Msg);
-		DispatchMessage(&Msg);
-		if (!_deletedCredentials && _mountDone && _scriptDone) {
-			if (spass != NULL) {
-				dalog("Erasing password from memory");
-				SecureZeroMemory(spass, strlen(spass));
-				_deletedCredentials = TRUE;
-			}
-		}
-	}
+	optimizeForRemote();
 	FreeLibrary(hKernel32);
 	FreeLibrary(hShell32);
 	FreeLibrary(hUser32);
@@ -633,7 +568,7 @@ static int setResWinMulti(struct resolution *res, int nres);
 static int setResWinLegacy(struct resolution *res, int nres);
 static int setResVMware(struct resolution *res, int nres);
 
-static int setResolution()
+static int setResolution(char *data)
 {
 	static int nres = 0;
 	static struct resolution res[MAX_SCREENS];
@@ -642,12 +577,6 @@ static int setResolution()
 	if (nres == -1 || callCount > 10) // We've been here before and consider config invalid, or are done
 		return 0;
 	if (nres == 0) {
-		// use config file in floppy
-		char data[300] = "";
-		GetPrivateProfileStringA("openslx", "resolution2", "", data, sizeof(data), SETTINGS_FILE); // Multi-res, space separated
-		if (data[0] == '\0') {
-			GetPrivateProfileStringA("openslx", "resolution", "", data, sizeof(data), SETTINGS_FILE); // Fallback
-		}
 		char *pos = data, *end;
 		while (*pos != '\0' && nres < 16) {
 			res[nres].w = strtol(pos, &end, 10);
