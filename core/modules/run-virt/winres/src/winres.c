@@ -589,6 +589,7 @@ static int setResolution(char *data)
 				alog("Invalid resolution in " SETTINGS_FILE ": '%s' (parsed width=%ld, height=%ld)", data, res[nres].w, res[nres].h);
 				continue;
 			}
+			dwlog(L"Resolution %d: %ldx%ld", nres, res[nres].w, res[nres].h);
 			nres++;
 		}
 		if (*pos != '\0') {
